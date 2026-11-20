@@ -5,6 +5,7 @@ macOS 選單列的英 ↔ 繁中快速翻譯器，使用 Apple 內建 Translatio
 ## 使用方式
 
 啟動後視窗會常駐在桌面（點別的 App 不會消失），位置可拖曳並會被記住。
+背景為 Liquid Glass 玻璃透明效果，透明度由 `TranslatorPanel.swift` 的 `glassOpacity`（目前 0.95）調整。
 
 | 操作 | 按鍵 |
 |---|---|
@@ -29,7 +30,9 @@ open ~/Applications/QuickTranslate.app
 需求：macOS 26+、Xcode（Swift 6.2+）、已下載離線語言「英文」與「中文（台灣）」
 （系統設定 → 一般 → 語言與地區 → 翻譯語言）。
 
-開機自動啟動：系統設定 → 一般 → 登入項目 → 加入 QuickTranslate.app。
+開機自動啟動：第一次啟動時會自動註冊為登入項目（macOS 可能跳出「已加入登入項目」通知）。
+要關閉可在選單列圖示 → 取消勾選「登入時自動啟動」，或到系統設定 → 一般 → 登入項目。
+請從 `~/Applications` 或 `/Applications` 執行 App，登入項目才會指向正確位置。
 
 ## 結構
 
@@ -38,6 +41,7 @@ Sources/QuickTranslate/
   main.swift             進入點（選單列 accessory app）
   AppDelegate.swift      選單列圖示、全域快捷鍵
   HotKey.swift           Carbon RegisterEventHotKey 包裝
+  LaunchAtLogin.swift    SMAppService 登入項目（開機自動啟動）
   TranslatorModel.swift  方向判斷、TranslationSession、防抖、複製
   TranslatorPanel.swift  Spotlight 風格浮動視窗 + SwiftUI 介面
 ```
@@ -55,5 +59,6 @@ Sources/QuickTranslate/
 
 | 版本 | 日期 | 摘要 |
 |---|---|---|
+| 0.3.0 | 2026-11-20 | Liquid Glass 玻璃透明背景（95%）；開機自動啟動（首次啟動自動註冊，選單可切換） |
 | 0.2.0 | 2026-11-20 | 啟動即顯示並常駐桌面、加關閉鈕、記住位置；修正無法貼上（補 Edit 選單、支援 ⌃V）；Enter 改為只複製 |
 | 0.1.0 | 2026-11-20 | L1 MVP：選單列、⌃⌥T、離線中英互譯、Enter 複製 |

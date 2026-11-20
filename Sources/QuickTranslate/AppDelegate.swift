@@ -8,6 +8,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let model = TranslatorModel()
     private lazy var panel = TranslatorPanel(model: model)
     private var keyMonitor: Any?
+    private lazy var launchItem: NSMenuItem = {
+        let item = NSMenuItem(title: "登入時自動啟動", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        item.target = self
+        return item
+    }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -17,9 +22,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let open = NSMenuItem(title: "開啟翻譯 (⌃⌥T)", action: #selector(togglePanel), keyEquivalent: "")
         open.target = self
         menu.addItem(open)
+        menu.addItem(launchItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "結束", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
+        menu.delegate = self
+
+        LaunchAtLogin.enableOnFirstRun()
 
         // 全域快捷鍵 ⌃⌥T（Carbon API，不需要輔助使用權限）
         hotKey = HotKey(keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(controlKey | optionKey)) { [weak self] in
@@ -32,7 +41,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installControlVPaste()
         model.warmUp()
         panel.present() // 啟動就顯示在桌面
+    }
 
+    @objc private func toggleLaunchAtLogin() {
+        LaunchAtLogin.setEnabled(!LaunchAtLogin.isEnabled)
     }
 
     /// 沒有 Edit 選單時 ⌘C / ⌘V / ⌘X / ⌘A / ⌘Z 不會送到輸入框，所以要補一個。
@@ -80,5 +92,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             panel.present()
         }
+    }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    /// 每次打開選單時同步打勾狀態（使用者也可能從系統設定關掉）。
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        launchItem.state = LaunchAtLogin.isEnabled ? .on : .off
     }
 }

@@ -19,7 +19,25 @@ final class TranslatorPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
-        contentView = NSHostingView(rootView: TranslatorView(model: model))
+        // 玻璃透明背景：Liquid Glass 墊底，透明度 glassOpacity，文字維持不透明
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+
+        let container = NSView()
+        let glass = NSGlassEffectView()
+        glass.style = .regular
+        glass.cornerRadius = 16
+        glass.alphaValue = Self.glassOpacity
+        glass.frame = container.bounds
+        glass.autoresizingMask = [.width, .height]
+        container.addSubview(glass)
+
+        let host = NSHostingView(rootView: TranslatorView(model: model))
+        host.frame = container.bounds
+        host.autoresizingMask = [.width, .height]
+        container.addSubview(host)
+        contentView = container
 
         // 記住使用者拖曳後的位置；第一次則放在螢幕中上方
         if !setFrameUsingName(Self.frameName), let screen = NSScreen.main {
@@ -30,6 +48,8 @@ final class TranslatorPanel: NSPanel {
     }
 
     private static let frameName = "QuickTranslatePanel"
+    /// 玻璃背景透明度（1.0 = 最實、數字越小越透）
+    private static let glassOpacity: CGFloat = 0.95
 
     override var canBecomeKey: Bool { true }
 
