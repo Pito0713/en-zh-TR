@@ -7,7 +7,7 @@ final class TranslatorPanel: NSPanel {
 
     init(model: TranslatorModel) {
         self.model = model
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 560, height: 280),
+        super.init(contentRect: NSRect(origin: .zero, size: Self.size),
                    styleMask: [.titled, .closable, .fullSizeContentView],
                    backing: .buffered, defer: false)
         titleVisibility = .hidden
@@ -44,9 +44,15 @@ final class TranslatorPanel: NSPanel {
             let f = screen.visibleFrame
             setFrameOrigin(NSPoint(x: f.midX - frame.width / 2, y: f.maxY - f.height * 0.25 - frame.height))
         }
+        // 舊版存的尺寸可能不同，位置沿用、尺寸固定（保持頂端位置不動）
+        if frame.size != Self.size {
+            setFrame(NSRect(x: frame.minX, y: frame.maxY - Self.size.height,
+                            width: Self.size.width, height: Self.size.height), display: false)
+        }
         setFrameAutosaveName(Self.frameName)
     }
 
+    static let size = NSSize(width: 560, height: 330)
     private static let frameName = "QuickTranslatePanel"
     /// 玻璃背景透明度（1.0 = 最實、數字越小越透）
     private static let glassOpacity: CGFloat = 0.95
@@ -54,7 +60,10 @@ final class TranslatorPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 
     /// Esc 關閉
-    override func cancelOperation(_ sender: Any?) { orderOut(nil) }
+    override func cancelOperation(_ sender: Any?) {
+        model.speaker.stop()
+        orderOut(nil)
+    }
 
     func present() {
         NSApp.activate()
@@ -68,31 +77,109 @@ struct TranslatorView: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(model.input.isEmpty ? "自動判斷中 ↔ 英" : model.direction.label)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if model.isBusy { ProgressView().controlSize(.small) }
+        VStack(spacing: 10) {
+            header
+            inputCard
+            outputCard
+            footer
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+        .frame(width: TranslatorPanel.size.width, height: TranslatorPanel.size.height)
+        .background(hiddenShortcuts)
+        .onAppear { focused = true }
+        .onChange(of: model.focusToken) { focused = true }
+    }
+
+    // MARK: 語言列（和左上角關閉鈕同一行）
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Menu {
+                Picker("來源語言", selection: $model.manualDirection) {
+                    Text("自動偵測").tag(Direction?.none)
+                    Text("中文").tag(Direction?.some(.zhToEn))
+                    Text("English").tag(Direction?.some(.enToZh))
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Text(sourceLabel)
             }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("選擇來源語言（⌘1 自動 · ⌘2 中文 · ⌘3 English）")
 
-            TextField("輸入中文或英文…", text: $model.input, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 20))
-                .lineLimit(1...4)
-                .focused($focused)
-                .onSubmit { model.copyOutput() }
-                .onChange(of: model.input) { model.inputChanged() }
+            Button { model.swap() } label: {
+                Image(systemName: "arrow.left.arrow.right")
+                    .frame(width: 24, height: 20)
+            }
+            .buttonStyle(.borderless)
+            .help("互換：結果換到輸入框並反向翻譯（⌘⇧X）")
+            .keyboardShortcut("x", modifiers: [.command, .shift])
+            .disabled(model.output.isEmpty && model.manualDirection == nil)
 
-            Divider()
+            Text(targetLabel)
+                .foregroundStyle(.primary)
 
+            Spacer()
+            if model.isBusy { ProgressView().controlSize(.small) }
+        }
+        .font(.system(size: 13, weight: .medium))
+        .padding(.leading, 50) // 讓出左上角關閉鈕
+        .frame(height: 26)
+    }
+
+    private var sourceLabel: String {
+        if let m = model.manualDirection { return m.sourceName }
+        return model.input.isEmpty ? "自動偵測" : "自動偵測・\(model.direction.sourceName)"
+    }
+
+    private var targetLabel: String {
+        if model.manualDirection == nil && model.input.isEmpty { return "中 ↔ 英" }
+        return model.direction.targetName
+    }
+
+    // MARK: 輸入
+
+    private var inputCard: some View {
+        TextField("輸入中文或英文…", text: $model.input, axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(.system(size: 20))
+            .lineLimit(1...3)
+            .focused($focused)
+            .onSubmit { model.copyOutput() }
+            .onChange(of: model.input) { model.inputChanged() }
+            .padding(.vertical, 12)
+            .padding(.leading, 14)
+            .padding(.trailing, 34)
+            .frame(maxWidth: .infinity, minHeight: 76, alignment: .topLeading)
+            .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(alignment: .topTrailing) {
+                if !model.input.isEmpty {
+                    Button {
+                        model.input = ""
+                        focused = true
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("清除")
+                    .padding(10)
+                }
+            }
+    }
+
+    // MARK: 結果
+
+    private var outputCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
             ScrollView {
                 Group {
                     if let err = model.errorMessage {
-                        Text(err).foregroundStyle(.red)
+                        Text(err).foregroundStyle(.red).font(.system(size: 13))
                     } else if model.output.isEmpty {
-                        Text("翻譯結果會即時顯示在這裡").foregroundStyle(.tertiary)
+                        Text("翻譯結果").foregroundStyle(.tertiary)
                     } else {
                         Text(model.output).textSelection(.enabled)
                     }
@@ -101,21 +188,60 @@ struct TranslatorView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            HStack {
-                Text("Enter 複製結果 · ⌘V 貼上 · ⌥Enter 換行 · Esc 收起")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+            HStack(spacing: 4) {
+                if let detected = model.mismatchedDirection {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text("輸入看起來是\(detected.sourceName)")
+                        .foregroundStyle(.secondary)
+                    Button("改成 \(detected.sourceName) → \(detected.targetName)") {
+                        model.manualDirection = detected
+                    }
+                    .buttonStyle(.link)
+                }
                 Spacer()
-                Button(model.copiedFlash ? "已複製 ✓" : "複製") { model.copyOutput() }
-                    .keyboardShortcut("c", modifiers: [.command, .shift])
-                    .disabled(model.output.isEmpty)
+                Button { model.toggleSpeak() } label: {
+                    Image(systemName: model.speaker.isSpeaking ? "stop.fill" : "speaker.wave.2.fill")
+                        .frame(width: 22, height: 18)
+                }
+                .buttonStyle(.borderless)
+                .help(model.speaker.isSpeaking ? "停止朗讀" : "朗讀（⌘⇧S）")
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(model.output.isEmpty)
+
+                Button { model.copyOutput() } label: {
+                    Label(model.copiedFlash ? "已複製" : "複製",
+                          systemImage: model.copiedFlash ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .help("複製結果（Enter / ⌘⇧C）")
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+                .disabled(model.output.isEmpty)
             }
+            .font(.system(size: 12))
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 34) // 留空間給左上角關閉鈕
-        .padding(.bottom, 14)
-        .frame(width: 560, height: 280)
-        .onAppear { focused = true }
-        .onChange(of: model.focusToken) { focused = true }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: 底部提示
+
+    private var footer: some View {
+        Text("Enter 複製 · ⌘⇧S 朗讀 · ⌘⇧X 互換 · ⌥Enter 換行 · Esc 收起")
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    /// 隱藏的快捷鍵：⌘1/2/3 切換來源語言
+    private var hiddenShortcuts: some View {
+        Group {
+            Button("") { model.manualDirection = nil }.keyboardShortcut("1")
+            Button("") { model.manualDirection = .zhToEn }.keyboardShortcut("2")
+            Button("") { model.manualDirection = .enToZh }.keyboardShortcut("3")
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
     }
 }

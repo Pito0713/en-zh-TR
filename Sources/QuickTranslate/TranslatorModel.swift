@@ -13,6 +13,10 @@ enum Direction {
         self == .zhToEn ? Locale.Language(identifier: "en") : Locale.Language(identifier: "zh-TW")
     }
     var label: String { self == .zhToEn ? "中文 → English" : "English → 中文" }
+    var sourceName: String { self == .zhToEn ? "中文" : "English" }
+    var targetName: String { self == .zhToEn ? "English" : "中文" }
+    /// 朗讀翻譯結果用的語音語言
+    var speechLanguage: String { self == .zhToEn ? "en-US" : "zh-TW" }
 
     /// 含任何中日韓漢字就視為中文，否則視為英文。
     static func detect(_ text: String) -> Direction {
@@ -27,10 +31,15 @@ final class TranslatorModel {
     var input = ""
     var output = ""
     var direction: Direction = .zhToEn
+    /// nil = 自動判斷；否則固定方向
+    var manualDirection: Direction? {
+        didSet { inputChanged() }
+    }
     var isBusy = false
     var errorMessage: String?
     var focusToken = 0
     var copiedFlash = false
+    let speaker = Speaker()
 
     @ObservationIgnored private var sessions: [Direction: TranslationSession] = [:]
     @ObservationIgnored private var pending: Task<Void, Never>?
@@ -38,6 +47,7 @@ final class TranslatorModel {
     /// 輸入變動後稍等一下再翻（打字時即時更新，又不會每個字都翻）。
     func inputChanged() {
         pending?.cancel()
+        speaker.stop()
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
             output = ""
@@ -45,16 +55,36 @@ final class TranslatorModel {
             isBusy = false
             return
         }
-        direction = Direction.detect(text)
+        let dir = manualDirection ?? Direction.detect(text)
+        direction = dir
         pending = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
-            await self?.translate(text)
+            await self?.translate(text, dir)
         }
     }
 
-    private func translate(_ text: String) async {
-        let dir = Direction.detect(text)
+    /// 手動鎖定方向但輸入語言對不上時，回傳偵測到的正確方向
+    var mismatchedDirection: Direction? {
+        guard let m = manualDirection else { return nil }
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        let detected = Direction.detect(text)
+        return detected == m ? nil : detected
+    }
+
+    /// ⇄ 把翻譯結果換到輸入框，方向反過來（可用來回譯檢查）。
+    func swap() {
+        let newInput = output
+        if let m = manualDirection {
+            manualDirection = (m == .zhToEn) ? .enToZh : .zhToEn
+        }
+        guard !newInput.isEmpty else { return }
+        input = newInput
+        inputChanged()
+    }
+
+    private func translate(_ text: String, _ dir: Direction) async {
         isBusy = true
         defer { isBusy = false }
         do {
@@ -97,6 +127,11 @@ final class TranslatorModel {
             try? await Task.sleep(for: .seconds(1))
             self?.copiedFlash = false
         }
+    }
+
+    /// 朗讀 / 停止朗讀翻譯結果
+    func toggleSpeak() {
+        speaker.toggle(output, language: direction.speechLanguage)
     }
 
     /// 叫出視窗時把游標放回輸入框（保留上次內容，⌘A 可全選重打）。
