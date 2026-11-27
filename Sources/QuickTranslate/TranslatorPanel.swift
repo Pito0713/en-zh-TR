@@ -61,7 +61,7 @@ final class TranslatorPanel: NSPanel {
 
     /// Esc 關閉
     override func cancelOperation(_ sender: Any?) {
-        model.speaker.stop()
+        model.stopSpeaking()
         orderOut(nil)
     }
 
@@ -87,6 +87,8 @@ struct TranslatorView: View {
         .padding(.top, 8)
         .padding(.bottom, 10)
         .frame(width: TranslatorPanel.size.width, height: TranslatorPanel.size.height)
+        // 新版 SDK 會替透明標題列保留 safe area，把整個版面往下推；這裡要自己排到最頂
+        .ignoresSafeArea()
         .background(hiddenShortcuts)
         .onAppear { focused = true }
         .onChange(of: model.focusToken) { focused = true }
@@ -124,6 +126,14 @@ struct TranslatorView: View {
 
             Spacer()
             if model.isBusy { ProgressView().controlSize(.small) }
+            Button { model.translateNow() } label: {
+                Label("翻譯", systemImage: "character.bubble")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .keyboardShortcut(.return, modifiers: .command)
+            .help("翻譯（Enter 或 ⌘Enter）")
+            .disabled(model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isBusy)
         }
         .font(.system(size: 13, weight: .medium))
         .padding(.leading, 50) // 讓出左上角關閉鈕
@@ -148,7 +158,7 @@ struct TranslatorView: View {
             .font(.system(size: 20))
             .lineLimit(1...3)
             .focused($focused)
-            .onSubmit { model.copyOutput() }
+            .onSubmit { model.submit() }
             .onChange(of: model.input) { model.inputChanged() }
             .padding(.vertical, 12)
             .padding(.leading, 14)
@@ -168,6 +178,19 @@ struct TranslatorView: View {
                     .padding(10)
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                if !model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button { model.toggleSpeakInput() } label: {
+                        Image(systemName: model.inputSpeaker.isSpeaking ? "stop.fill" : "speaker.wave.2.fill")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 22, height: 18)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(model.inputSpeaker.isSpeaking ? "停止朗讀" : "朗讀原文（⌘⇧I）")
+                    .keyboardShortcut("i", modifiers: [.command, .shift])
+                    .padding(8)
+                }
+            }
     }
 
     // MARK: 結果
@@ -179,9 +202,10 @@ struct TranslatorView: View {
                     if let err = model.errorMessage {
                         Text(err).foregroundStyle(.red).font(.system(size: 13))
                     } else if model.output.isEmpty {
-                        Text("翻譯結果").foregroundStyle(.tertiary)
+                        Text(model.isBusy ? "翻譯中…" : "按 Enter 翻譯").foregroundStyle(.tertiary)
                     } else {
                         Text(model.output).textSelection(.enabled)
+                            .opacity(model.isStale ? 0.4 : 1)
                     }
                 }
                 .font(.system(size: 18))
@@ -197,6 +221,10 @@ struct TranslatorView: View {
                         model.manualDirection = detected
                     }
                     .buttonStyle(.link)
+                } else if model.isStale {
+                    Text("輸入已修改，按 Enter 重新翻譯").foregroundStyle(.secondary)
+                } else if let note = model.engineNote {
+                    Text(note).foregroundStyle(.tertiary)
                 }
                 Spacer()
                 Button { model.toggleSpeak() } label: {
@@ -204,7 +232,7 @@ struct TranslatorView: View {
                         .frame(width: 22, height: 18)
                 }
                 .buttonStyle(.borderless)
-                .help(model.speaker.isSpeaking ? "停止朗讀" : "朗讀（⌘⇧S）")
+                .help(model.speaker.isSpeaking ? "停止朗讀" : "朗讀翻譯結果（⌘⇧S）")
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(model.output.isEmpty)
 
@@ -213,7 +241,7 @@ struct TranslatorView: View {
                           systemImage: model.copiedFlash ? "checkmark" : "doc.on.doc")
                 }
                 .buttonStyle(.borderless)
-                .help("複製結果（Enter / ⌘⇧C）")
+                .help("複製結果（翻譯後再按 Enter / ⌘⇧C）")
                 .keyboardShortcut("c", modifiers: [.command, .shift])
                 .disabled(model.output.isEmpty)
             }
@@ -228,9 +256,11 @@ struct TranslatorView: View {
     // MARK: 底部提示
 
     private var footer: some View {
-        Text("Enter 複製 · ⌘⇧S 朗讀 · ⌘⇧X 互換 · ⌥Enter 換行 · Esc 收起")
+        Text("Enter 翻譯，再按一次複製 · ⌘⇧S 朗讀 · ⌘⇧X 互換 · ⌥Enter 換行 · Esc 收起")
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
             .frame(maxWidth: .infinity, alignment: .center)
     }
 
